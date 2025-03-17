@@ -102,6 +102,9 @@ function initApp() {
     document.getElementById('modal-overlay').addEventListener('click', function() {
         closeDayLogsModal();
     });
+
+    // Add this to your initApp function or wherever you set up event listeners
+    document.getElementById('logout-btn').addEventListener('click', logout);
 }
 
 // Routine data
@@ -852,8 +855,37 @@ function testFirebaseConnection() {
   });
 }
 
-// Update the auth state observer to remove the enableOfflineSupport call
+// Add this function to clear local data when a user logs out
+function clearLocalUserData() {
+    localStorage.removeItem('studyLogs');
+    localStorage.removeItem(ROUTINE_STORAGE_KEY);
+    localStorage.removeItem('completedItems');
+    
+    // Clear any other user-specific data
+    userRoutine = [];
+    
+    console.log("Local user data cleared");
+}
+
+// Update the logout function to clear local data
+function logout() {
+    auth.signOut()
+        .then(() => {
+            clearLocalUserData();
+            showSuccess("Logged out successfully");
+        })
+        .catch(error => {
+            logFirebaseError(error, 'Logout');
+        });
+}
+
+// Update the auth state observer to prioritize Firestore data and handle user switching
 auth.onAuthStateChanged(async user => {
+    // Clear UI and data when auth state changes
+    userRoutine = [];
+    document.querySelector('.routine-container').innerHTML = '';
+    document.getElementById('todays-log-content').innerHTML = '<div class="no-logs">No study logs for today yet.</div>';
+    
     if (user) {
         currentUser = user;
         document.getElementById('auth-container').style.display = 'none';
@@ -861,25 +893,31 @@ auth.onAuthStateChanged(async user => {
         // Test Firebase connection
         testFirebaseConnection();
         
-        // Load user's routine
+        // Load user's routine from Firestore
         try {
             const doc = await db.collection('routines').doc(user.uid).get();
+            
             if (doc.exists && doc.data().routine && doc.data().routine.length > 0) {
+                console.log("Found existing routine in Firestore");
                 userRoutine = doc.data().routine;
+                
+                // Save to localStorage for offline access
+                localStorage.setItem(ROUTINE_STORAGE_KEY, JSON.stringify(userRoutine));
+                
                 generateRoutineItems();
                 document.querySelector('.container').style.display = 'block';
+                document.getElementById('setup-wizard').style.display = 'none';
             } else {
-                // Show setup wizard if no routine exists
+                console.log("No routine found in Firestore, showing setup wizard");
                 showSetupWizard();
                 document.querySelector('.container').style.display = 'none';
             }
             
-            // Load study logs
-            await loadStudyLogs();
+            // Load study logs from Firestore
+            await loadStudyLogsFromFirestore();
             
         } catch (error) {
             logFirebaseError(error, 'Load routine');
-            // Show setup wizard as fallback
             showSetupWizard();
         }
         
@@ -899,32 +937,36 @@ auth.onAuthStateChanged(async user => {
         currentUser = null;
         document.getElementById('auth-container').style.display = 'flex';
         document.querySelector('.container').style.display = 'none';
-        document.getElementById('setup-wizard').classList.remove('active');
+        document.getElementById('setup-wizard').style.display = 'none';
     }
 });
 
-// Update finalizeRoutine function
-async function finalizeRoutine() {
-    if (userRoutine.length === 0) {
-        alert('Please add at least one routine item.');
-        return;
-    }
+// Updated function to load study logs only from Firestore
+async function loadStudyLogsFromFirestore() {
+    if (!currentUser) return;
     
     try {
-        console.log("Saving routine for user:", currentUser.uid);
-        console.log("Routine data:", userRoutine);
-        
-        await db.collection('routines').doc(currentUser.uid).set({
-            routine: userRoutine,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        document.getElementById('setup-wizard').classList.remove('active');
-        document.querySelector('.container').style.display = 'block';
-        generateRoutineItems();
-        showSuccess('Routine saved successfully!');
+        const doc = await db.collection('studyLogs').doc(currentUser.uid).get();
+        if (doc.exists) {
+            const firestoreLogs = doc.data();
+            
+            // Replace local logs with Firestore logs
+            localStorage.setItem('studyLogs', JSON.stringify(firestoreLogs));
+            
+            // Update UI
+            updateTodaysLogs();
+            updateCalendarDisplay();
+            
+            console.log("Study logs loaded from Firestore");
+        } else {
+            // No logs in Firestore, clear local logs
+            localStorage.setItem('studyLogs', '{}');
+            updateTodaysLogs();
+            updateCalendarDisplay();
+        }
     } catch (error) {
-        logFirebaseError(error, 'Save routine');
+        console.error("Error loading study logs:", error);
+        showError("Failed to load study logs from server");
     }
 }
 
@@ -1065,7 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Profile Management
     document.getElementById('change-password-btn').addEventListener('click', showPasswordResetModal);
     document.getElementById('send-reset-link').addEventListener('click', sendPasswordReset);
-    document.getElementById('logout-btn').addEventListener('click', () => auth.signOut());
+    document.getElementById('logout-btn').addEventListener('click', logout);
 
     // Data Management
     document.getElementById('export-data-btn').addEventListener('click', exportData);
@@ -1182,7 +1224,7 @@ async function saveStudyLog(sessionId, date, notes) {
     }
     studyLogs[dateStr][sessionId] = {
         notes: notes,
-        timestamp: date.getTime()
+        timestamp: date.getTime() // Store as milliseconds for consistency
     };
     localStorage.setItem('studyLogs', JSON.stringify(studyLogs));
     
@@ -1363,15 +1405,10 @@ function generateCalendar(month, year) {
     }
 }
 
-// Add this function to show logs for a specific day
+// Improved function to show logs for a specific day
 function showDayLogs(dateStr) {
     const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
     const dayLogs = studyLogs[dateStr] || {};
-    
-    if (Object.keys(dayLogs).length === 0) {
-        showInfo('No study logs for this day.');
-        return;
-    }
     
     // Format the date for display
     const date = new Date(dateStr);
@@ -1382,55 +1419,80 @@ function showDayLogs(dateStr) {
         day: 'numeric' 
     });
     
-    // Create modal content
-    let modalContent = `<h3>Study Logs for ${formattedDate}</h3><div class="day-logs">`;
-    
-    // Sort logs by timestamp
-    const sortedLogs = Object.entries(dayLogs).sort((a, b) => {
-        return a[1].timestamp - b[1].timestamp;
-    });
-    
-    for (const [sessionId, logData] of sortedLogs) {
-        const sessionTime = new Date(logData.timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        
-        // Find the routine item description
-        let description = "Study Session";
-        for (const item of userRoutine) {
-            if (item.sessionId === sessionId) {
-                description = item.description;
-                break;
-            }
-        }
-        
-        modalContent += `
-            <div class="log-entry">
-                <div class="log-time">${sessionTime}</div>
-                <div class="log-details">
-                    <div class="log-title">${description}</div>
-                    <div class="log-notes">${logData.notes}</div>
-                </div>
-            </div>
-        `;
-    }
-    
-    modalContent += '</div>';
-    
-    // Show modal with logs
+    // Get modal elements
     const dayLogsModal = document.getElementById('day-logs-modal');
     const modalOverlay = document.getElementById('modal-overlay');
+    const contentContainer = document.getElementById('day-logs-content');
     
-    if (dayLogsModal && modalOverlay) {
-        document.getElementById('day-logs-content').innerHTML = modalContent;
-        dayLogsModal.classList.add('active');
-        modalOverlay.classList.add('active');
-    } else {
-        console.error('Day logs modal or overlay not found');
-        // Fallback to notification if modal doesn't exist
-        showInfo(`Study logs for ${formattedDate}: ${sortedLogs.length} entries`);
+    if (!dayLogsModal || !modalOverlay || !contentContainer) {
+        console.error('Modal elements not found');
+        showError('Could not display logs. Please try again.');
+        return;
     }
+    
+    // Create modal content
+    let modalContent = `<h3>Study Logs for ${formattedDate}</h3>`;
+    
+    if (Object.keys(dayLogs).length === 0) {
+        // Show empty state
+        modalContent += `
+            <div class="no-logs-message">
+                <i class="fas fa-book"></i>
+                <p>No study logs recorded for this day.</p>
+            </div>
+        `;
+    } else {
+        // Sort logs by timestamp
+        const sortedLogs = Object.entries(dayLogs).sort((a, b) => {
+            return a[1].timestamp - b[1].timestamp;
+        });
+        
+        modalContent += `<div class="day-logs">`;
+        
+        for (const [sessionId, logData] of sortedLogs) {
+            // Fix for invalid date - ensure timestamp is a valid number
+            let sessionTime = "Invalid Time";
+            try {
+                if (logData.timestamp) {
+                    const timeDate = new Date(logData.timestamp);
+                    if (!isNaN(timeDate.getTime())) {
+                        sessionTime = timeDate.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Error formatting time:", e);
+            }
+            
+            // Find the routine item description
+            let description = "Study Session";
+            for (const item of userRoutine) {
+                if (item.sessionId === sessionId) {
+                    description = item.description;
+                    break;
+                }
+            }
+            
+            modalContent += `
+                <div class="log-entry">
+                    <div class="log-time">${sessionTime}</div>
+                    <div class="log-details">
+                        <div class="log-title">${description}</div>
+                        <div class="log-notes">${logData.notes || ""}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        modalContent += '</div>';
+    }
+    
+    // Update modal content and show
+    contentContainer.innerHTML = modalContent;
+    dayLogsModal.classList.add('active');
+    modalOverlay.classList.add('active');
 }
 
 // Add this function to close the day logs modal
