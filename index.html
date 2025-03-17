@@ -150,7 +150,16 @@
                             <button id="next-month"><i class="fas fa-chevron-right"></i></button>
                         </div>
                         <div class="calendar-grid">
-                            <!-- Calendar will be generated here -->
+                            <div class="calendar-header">
+                                <div>Sun</div>
+                                <div>Mon</div>
+                                <div>Tue</div>
+                                <div>Wed</div>
+                                <div>Thu</div>
+                                <div>Fri</div>
+                                <div>Sat</div>
+                            </div>
+                            <div id="calendar-days" class="calendar-days"></div>
                         </div>
                     </div>
                     <div class="study-details">
@@ -238,6 +247,16 @@
             <button class="save-btn" id="save-popup-log">Save</button>
         </div>
     </div>
+
+    <div id="notification-container" class="notification-container"></div>
+
+    <div id="day-logs-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeDayLogsModal()">&times;</span>
+            <div id="day-logs-content"></div>
+        </div>
+    </div>
+    <div id="modal-overlay" class="modal-overlay"></div>
 
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>

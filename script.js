@@ -97,6 +97,11 @@ function initApp() {
     
     // Check if it's first visit
     checkFirstVisit();
+
+    // Add event listener for modal overlay
+    document.getElementById('modal-overlay').addEventListener('click', function() {
+        closeDayLogsModal();
+    });
 }
 
 // Routine data
@@ -195,7 +200,7 @@ function showStudyLogPopup(sessionId) {
     textarea.focus();
     
     // Set up event listeners
-    saveBtn.onclick = saveStudyLogFromPopup;
+    saveBtn.onclick = () => saveStudySession(sessionId);
     cancelBtn.onclick = closeStudyLogPopup;
     
     // Close popup when clicking outside
@@ -218,124 +223,142 @@ function closeStudyLogPopup() {
     saveCompletedStatus();
 }
 
-// Save study log from popup
-function saveStudyLogFromPopup() {
+// Update the saveStudySession function
+function saveStudySession(sessionId) {
     const popup = document.getElementById('study-log-popup');
-    const sessionId = popup.dataset.sessionId;
     const notes = document.getElementById('popup-study-notes').value.trim();
     
-    if (!notes) {
-        alert('Please enter what you studied during this session.');
-        return;
+    if (notes) {
+        // Save to Firebase and local storage
+        saveStudyLog(sessionId, new Date(), notes);
+        
+        // Close popup
+        popup.classList.remove('active');
+        document.getElementById('popup-overlay').classList.remove('active');
+        document.getElementById('popup-study-notes').value = '';
+        
+        // Mark as completed
+        const routineItem = document.querySelector(`.routine-item[data-session-id="${sessionId}"]`);
+        if (routineItem) {
+            routineItem.classList.add('completed');
+            saveCompletedStatus(routineItem.dataset.index, true);
+        }
     }
-    
-    // Get session time from routine data
-    const sessionInfo = routineData.find(item => item.sessionId === sessionId);
-    const sessionTime = sessionInfo ? sessionInfo.time : '';
-    
-    // Get today's date string
-    const today = new Date().toLocaleDateString();
-    
-    // Get existing logs or initialize empty object
-    const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
-    
-    // Initialize today's log if it doesn't exist
-    if (!studyLogs[today]) {
-        studyLogs[today] = [];
-    }
-    
-    // Add new log entry
-    studyLogs[today].push({
-        sessionId,
-        sessionTime,
-        notes,
-        timestamp: new Date().toISOString()
-    });
-    
-    // Save to localStorage
-    localStorage.setItem('studyLogs', JSON.stringify(studyLogs));
-    
-    // Save completed status
-    saveCompletedStatus();
-    
-    // Update today's logs display
-    updateTodaysLogs();
-    
-    // Update calendar
-    updateCalendarDisplay();
-    
-    // Close popup
-    closeStudyLogPopup();
-    
-    // Show success message
-    showNotification('Study log saved successfully!');
 }
 
 // Update today's logs display
 function updateTodaysLogs() {
-    const container = document.getElementById('todays-log-content');
-    const today = new Date().toLocaleDateString();
+    const todayStr = new Date().toISOString().split('T')[0];
     const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
-    const todaysLogs = studyLogs[today] || [];
+    const todaysLogs = studyLogs[todayStr] || {};
     
-    if (todaysLogs.length === 0) {
-        container.innerHTML = '<div class="no-logs">No study logs for today yet.</div>';
+    const logContent = document.getElementById('todays-log-content');
+    
+    if (Object.keys(todaysLogs).length === 0) {
+        logContent.innerHTML = '<div class="no-logs">No study logs for today yet.</div>';
         return;
     }
     
-    let html = '';
-    todaysLogs.forEach(log => {
-        html += `
-            <div class="log-entry">
-                <div class="log-time">${log.sessionTime}</div>
-                <div class="log-content">${log.notes}</div>
-            </div>
-        `;
+    let logHTML = '';
+    
+    // Sort logs by timestamp
+    const sortedLogs = Object.entries(todaysLogs).sort((a, b) => {
+        return a[1].timestamp - b[1].timestamp;
     });
     
-    container.innerHTML = html;
+    for (const [sessionId, logData] of sortedLogs) {
+        const sessionTime = new Date(logData.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        // Find the routine item description
+        let description = "Study Session";
+        for (const item of userRoutine) {
+            if (item.sessionId === sessionId) {
+                description = item.description;
+                break;
+            }
+        }
+        
+        logHTML += `
+            <div class="log-entry">
+                <div class="log-time">${sessionTime}</div>
+                <div class="log-details">
+                    <div class="log-title">${description}</div>
+                    <div class="log-notes">${logData.notes}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    logContent.innerHTML = logHTML;
 }
 
-// Show notification
-function showNotification(message) {
+// Notification system
+function showNotification(message, type = 'info') {
+    // Create notification container if it doesn't exist
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        container.className = 'notification-container';
+        document.body.appendChild(container);
+    }
+    
     // Create notification element
     const notification = document.createElement('div');
-    notification.className = 'notification';
-    notification.textContent = message;
+    notification.className = `notification notification-${type}`;
     
-    // Style the notification
-    notification.style.position = 'fixed';
-    notification.style.bottom = '20px';
-    notification.style.right = '20px';
-    notification.style.backgroundColor = 'var(--success-color)';
-    notification.style.color = 'white';
-    notification.style.padding = '15px 25px';
-    notification.style.borderRadius = '5px';
-    notification.style.boxShadow = '0 5px 15px rgba(0, 0, 0, 0.2)';
-    notification.style.zIndex = '1000';
-    notification.style.opacity = '0';
-    notification.style.transform = 'translateY(20px)';
-    notification.style.transition = 'all 0.3s ease';
+    // Set icon based on type
+    let icon = 'info-circle';
+    if (type === 'success') icon = 'check-circle';
+    if (type === 'error') icon = 'exclamation-circle';
     
-    // Add to body
-    document.body.appendChild(notification);
+    // Create notification content
+    notification.innerHTML = `
+        <div class="notification-content">
+            <i class="fas fa-${icon} notification-icon"></i>
+            <span class="notification-message">${message}</span>
+        </div>
+        <button class="notification-close">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
     
-    // Trigger animation
-    setTimeout(() => {
-        notification.style.opacity = '1';
-        notification.style.transform = 'translateY(0)';
-    }, 10);
+    // Add to container
+    container.appendChild(notification);
     
-    // Remove after 3 seconds
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        notification.style.transform = 'translateY(20px)';
-        
-        // Remove from DOM after animation
+    // Add close button functionality
+    const closeBtn = notification.querySelector('.notification-close');
+    closeBtn.addEventListener('click', () => {
+        notification.style.animation = 'fadeOut 0.3s forwards';
         setTimeout(() => {
-            document.body.removeChild(notification);
+            notification.remove();
         }, 300);
-    }, 3000);
+    });
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+// Show error notification
+function showError(message) {
+    showNotification(message, 'error');
+}
+
+// Show success notification
+function showSuccess(message) {
+    showNotification(message, 'success');
+}
+
+// Show info notification
+function showInfo(message) {
+    showNotification(message, 'info');
 }
 
 // Save completed status to localStorage
@@ -371,6 +394,23 @@ function loadCompletedStatus() {
 
 // Initialize calendar
 function initCalendar() {
+    const calendarGrid = document.querySelector('.calendar-grid');
+    if (!calendarGrid) {
+        console.warn('Calendar grid not found in the DOM');
+        return;
+    }
+    
+    // Make sure calendar days container exists
+    if (!document.getElementById('calendar-days')) {
+        console.warn('Calendar days container not found');
+        return;
+    }
+    
+    // Set current month and year
+    displayedMonth = currentDate.getMonth();
+    displayedYear = currentDate.getFullYear();
+    
+    // Update calendar display
     updateCalendarDisplay();
 }
 
@@ -511,7 +551,7 @@ function setupPopupEventListeners() {
     const cancelBtn = document.getElementById('cancel-log');
     
     // Set up event listeners
-    saveBtn.addEventListener('click', saveStudyLogFromPopup);
+    saveBtn.addEventListener('click', () => saveStudySession(popup.dataset.sessionId));
     cancelBtn.addEventListener('click', closeStudyLogPopup);
     
     // Only close when clicking directly on the overlay, not the popup
@@ -593,6 +633,28 @@ function checkFirstVisit() {
 function showSetupWizard() {
     const wizard = document.getElementById('setup-wizard');
     wizard.classList.add('active');
+    
+    // Reset the welcome step to be active
+    document.getElementById('welcome-step').classList.add('active');
+    document.getElementById('add-routine-step').classList.remove('active');
+    
+    // Clear any existing routine items in the preview
+    userRoutine = [];
+    document.getElementById('routine-preview').innerHTML = '';
+    
+    // Update the welcome message to be more personalized
+    const welcomeStep = document.getElementById('welcome-step');
+    welcomeStep.innerHTML = `
+        <h3>Welcome, ${currentUser.email.split('@')[0]}! 👋</h3>
+        <div class="welcome-animation">
+            <img src="assets/icons/icon-192x192.png" alt="Daily Routine" class="welcome-icon">
+        </div>
+        <p class="welcome-text">Let's create your personalized daily routine that will help you stay organized and productive!</p>
+        <p class="welcome-subtext">You can always modify it later.</p>
+        <button class="next-btn" onclick="startRoutineSetup()">
+            <i class="fas fa-magic"></i> Create My Routine
+        </button>
+    `;
 }
 
 // Start routine setup
@@ -757,21 +819,91 @@ function handleDrop(e) {
     updateRoutinePreview();
 }
 
-// Error display function
-function showError(message) {
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'error-message';
-    errorDiv.textContent = message;
-    
-    const form = document.getElementById('routine-form');
-    form.insertBefore(errorDiv, form.firstChild);
-    
-    setTimeout(() => {
-        errorDiv.remove();
-    }, 3000);
+// Add at the top of your script.js file
+function logFirebaseError(error, operation) {
+  console.error(`Firebase ${operation} error:`, error);
+  console.error('Error code:', error.code);
+  console.error('Error message:', error.message);
+  
+  // Show more detailed error to user
+  showError(`${operation} failed: ${error.message}`);
 }
 
-// Finalize routine setup
+// Add this function to test Firebase connection
+function testFirebaseConnection() {
+  console.log("Testing Firebase connection...");
+  
+  // Test authentication
+  console.log("Auth state:", auth.currentUser ? "Logged in" : "Not logged in");
+  if (auth.currentUser) {
+    console.log("Current user ID:", auth.currentUser.uid);
+  }
+  
+  // Test Firestore
+  db.collection('test').doc('test').set({
+    test: 'This is a test',
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  })
+  .then(() => {
+    console.log("Firestore write test successful!");
+  })
+  .catch(error => {
+    console.error("Firestore write test failed:", error);
+  });
+}
+
+// Update the auth state observer to remove the enableOfflineSupport call
+auth.onAuthStateChanged(async user => {
+    if (user) {
+        currentUser = user;
+        document.getElementById('auth-container').style.display = 'none';
+        
+        // Test Firebase connection
+        testFirebaseConnection();
+        
+        // Load user's routine
+        try {
+            const doc = await db.collection('routines').doc(user.uid).get();
+            if (doc.exists && doc.data().routine && doc.data().routine.length > 0) {
+                userRoutine = doc.data().routine;
+                generateRoutineItems();
+                document.querySelector('.container').style.display = 'block';
+            } else {
+                // Show setup wizard if no routine exists
+                showSetupWizard();
+                document.querySelector('.container').style.display = 'none';
+            }
+            
+            // Load study logs
+            await loadStudyLogs();
+            
+        } catch (error) {
+            logFirebaseError(error, 'Load routine');
+            // Show setup wizard as fallback
+            showSetupWizard();
+        }
+        
+        // Add online/offline detection
+        window.addEventListener('online', () => {
+            document.getElementById('offline-status').style.display = 'none';
+            syncStudyLogs();
+            showSuccess("You're back online! Your data has been synced.");
+        });
+        
+        window.addEventListener('offline', () => {
+            document.getElementById('offline-status').style.display = 'block';
+            showInfo("You're offline. Changes will be saved locally and synced when you're back online.");
+        });
+        
+    } else {
+        currentUser = null;
+        document.getElementById('auth-container').style.display = 'flex';
+        document.querySelector('.container').style.display = 'none';
+        document.getElementById('setup-wizard').classList.remove('active');
+    }
+});
+
+// Update finalizeRoutine function
 async function finalizeRoutine() {
     if (userRoutine.length === 0) {
         alert('Please add at least one routine item.');
@@ -779,6 +911,9 @@ async function finalizeRoutine() {
     }
     
     try {
+        console.log("Saving routine for user:", currentUser.uid);
+        console.log("Routine data:", userRoutine);
+        
         await db.collection('routines').doc(currentUser.uid).set({
             routine: userRoutine,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -787,9 +922,9 @@ async function finalizeRoutine() {
         document.getElementById('setup-wizard').classList.remove('active');
         document.querySelector('.container').style.display = 'block';
         generateRoutineItems();
+        showSuccess('Routine saved successfully!');
     } catch (error) {
-        console.error('Error saving routine:', error);
-        showError('Failed to save routine. Please try again.');
+        logFirebaseError(error, 'Save routine');
     }
 }
 
@@ -818,47 +953,6 @@ function clearForm() {
     document.getElementById('routine-form').reset();
 }
 
-// Update the welcome step in your HTML to make it more exciting
-document.getElementById('welcome-step').innerHTML = `
-    <h3>Welcome! 👋</h3>
-    <div class="welcome-animation">
-        <img src="assets/icons/icon-192x192.png" alt="Daily Routine" class="welcome-icon">
-    </div>
-    <p class="welcome-text">Let's create your personalized daily routine that will help you stay organized and productive!</p>
-    <p class="welcome-subtext">You can always modify it later.</p>
-    <button class="next-btn" onclick="startRoutineSetup()">
-        <i class="fas fa-magic"></i> Create My Routine
-    </button>
-`;
-
-// Update auth state observer
-auth.onAuthStateChanged(async user => {
-    if (user) {
-        currentUser = user;
-        document.getElementById('auth-container').style.display = 'none';
-        document.querySelector('.container').style.display = 'block';
-        
-        // Load user's routine
-        try {
-            const doc = await db.collection('routines').doc(user.uid).get();
-            if (doc.exists) {
-                userRoutine = doc.data().routine;
-                generateRoutineItems();
-            } else {
-                showSetupWizard();
-            }
-        } catch (error) {
-            console.error('Error loading routine:', error);
-            showError('Failed to load routine');
-        }
-    } else {
-        currentUser = null;
-        document.getElementById('auth-container').style.display = 'flex';
-        document.querySelector('.container').style.display = 'none';
-        document.getElementById('setup-wizard').style.display = 'none';
-    }
-});
-
 // Update login function
 function login(email, password) {
     const loginBtn = document.getElementById('login-btn');
@@ -869,9 +963,28 @@ function login(email, password) {
         .then(() => {
             // Clear form
             document.getElementById('login-form-element').reset();
+            showSuccess('Login successful! Welcome back.');
         })
         .catch(error => {
-            showError(error.message);
+            // Handle specific auth errors
+            let errorMessage = error.message;
+            switch(error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'No account found with this email. Please register.';
+                    break;
+                case 'auth/wrong-password':
+                    errorMessage = 'Incorrect password. Please try again.';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email format.';
+                    break;
+                case 'auth/too-many-requests':
+                    errorMessage = 'Too many failed login attempts. Please try again later.';
+                    break;
+            }
+            showError(errorMessage);
+            console.error('Auth error code:', error.code);
+            console.error('Auth error message:', error.message);
         })
         .finally(() => {
             loginBtn.disabled = false;
@@ -889,10 +1002,22 @@ function register(email, password) {
         .then(() => {
             // Clear form
             document.getElementById('register-form-element').reset();
-            showSuccess('Account created successfully!');
+            showSuccess('Account created successfully! Welcome to Daily Routine.');
         })
         .catch(error => {
-            showError(error.message);
+            let errorMessage = error.message;
+            switch(error.code) {
+                case 'auth/email-already-in-use':
+                    errorMessage = 'This email is already registered. Please login instead.';
+                    break;
+                case 'auth/weak-password':
+                    errorMessage = 'Password is too weak. Please use at least 6 characters.';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email format.';
+                    break;
+            }
+            showError(errorMessage);
         })
         .finally(() => {
             registerBtn.disabled = false;
@@ -1039,16 +1164,282 @@ async function importData(file) {
     }
 }
 
-// Success message function
-function showSuccess(message) {
-    const successDiv = document.createElement('div');
-    successDiv.className = 'success-message';
-    successDiv.textContent = message;
+// Add these functions to handle study log synchronization with Firebase
+
+// Save study log to Firestore and local storage
+async function saveStudyLog(sessionId, date, notes) {
+    if (!currentUser) return;
     
-    const form = document.querySelector('.container');
-    form.insertBefore(successDiv, form.firstChild);
+    const dateStr = date.toISOString().split('T')[0];
+    const timestamp = firebase.firestore.Timestamp.fromDate(date);
     
-    setTimeout(() => {
-        successDiv.remove();
-    }, 3000);
+    // Get existing logs from localStorage first
+    const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
+    
+    // Update local storage
+    if (!studyLogs[dateStr]) {
+        studyLogs[dateStr] = {};
+    }
+    studyLogs[dateStr][sessionId] = {
+        notes: notes,
+        timestamp: date.getTime()
+    };
+    localStorage.setItem('studyLogs', JSON.stringify(studyLogs));
+    
+    // Update Firestore (will queue if offline)
+    try {
+        await db.collection('studyLogs').doc(currentUser.uid).set({
+            [dateStr]: {
+                [sessionId]: {
+                    notes: notes,
+                    timestamp: timestamp
+                },
+                ...((await getExistingFirestoreLogs(dateStr)) || {})
+            }
+        }, { merge: true });
+        
+        console.log("Study log saved to Firestore");
+    } catch (error) {
+        console.error("Error saving study log to Firestore:", error);
+        // Will be synced later when online
+    }
+    
+    // Update UI
+    updateTodaysLogs();
+    updateCalendarDisplay();
+}
+
+// Get existing logs for a specific date from Firestore
+async function getExistingFirestoreLogs(dateStr) {
+    if (!currentUser) return null;
+    
+    try {
+        const doc = await db.collection('studyLogs').doc(currentUser.uid).get();
+        if (doc.exists && doc.data()[dateStr]) {
+            return doc.data()[dateStr];
+        }
+        return null;
+    } catch (error) {
+        console.error("Error getting existing logs:", error);
+        return null;
+    }
+}
+
+// Load study logs from Firestore and merge with local storage
+async function loadStudyLogs() {
+    if (!currentUser) return;
+    
+    try {
+        const doc = await db.collection('studyLogs').doc(currentUser.uid).get();
+        if (doc.exists) {
+            const firestoreLogs = doc.data();
+            const localLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
+            
+            // Merge logs (prioritize local logs as they might be newer)
+            const mergedLogs = { ...firestoreLogs, ...localLogs };
+            
+            // Update local storage with merged logs
+            localStorage.setItem('studyLogs', JSON.stringify(mergedLogs));
+            
+            // Update UI
+            updateTodaysLogs();
+            updateCalendarDisplay();
+            
+            console.log("Study logs loaded and merged");
+        }
+    } catch (error) {
+        console.error("Error loading study logs:", error);
+        // Continue with local logs
+    }
+}
+
+// Sync local logs with Firestore (call this when coming online)
+async function syncStudyLogs() {
+    if (!currentUser) return;
+    
+    const localLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
+    if (Object.keys(localLogs).length === 0) return;
+    
+    try {
+        // Get all logs from Firestore
+        const doc = await db.collection('studyLogs').doc(currentUser.uid).get();
+        const firestoreLogs = doc.exists ? doc.data() : {};
+        
+        // Merge logs (prioritize local logs)
+        const mergedLogs = { ...firestoreLogs };
+        
+        // Convert local timestamps to Firestore timestamps
+        for (const dateStr in localLogs) {
+            if (!mergedLogs[dateStr]) mergedLogs[dateStr] = {};
+            
+            for (const sessionId in localLogs[dateStr]) {
+                mergedLogs[dateStr][sessionId] = {
+                    notes: localLogs[dateStr][sessionId].notes,
+                    timestamp: firebase.firestore.Timestamp.fromMillis(
+                        localLogs[dateStr][sessionId].timestamp
+                    )
+                };
+            }
+        }
+        
+        // Update Firestore with merged logs
+        await db.collection('studyLogs').doc(currentUser.uid).set(mergedLogs);
+        console.log("Study logs synced with Firestore");
+        showSuccess("Your study logs have been synced");
+    } catch (error) {
+        console.error("Error syncing study logs:", error);
+        showError("Failed to sync study logs. Will try again later.");
+    }
+}
+
+// Add a fallback for the calendar update function
+function updateCalendarDisplay() {
+    // Get the current month and year
+    const month = displayedMonth;
+    const year = displayedYear;
+    
+    // Update the month display
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    document.getElementById('current-month').textContent = `${monthNames[month]} ${year}`;
+    
+    // Generate the calendar
+    generateCalendar(month, year);
+}
+
+// Add this function to your script.js file
+function generateCalendar(month, year) {
+    const calendarDays = document.getElementById('calendar-days');
+    if (!calendarDays) {
+        console.error('Calendar days container not found');
+        return;
+    }
+    
+    calendarDays.innerHTML = '';
+    
+    // Get the first day of the month
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    
+    // Get the number of days in the month
+    const daysInMonth = lastDay.getDate();
+    
+    // Get the day of the week for the first day (0-6)
+    const firstDayIndex = firstDay.getDay();
+    
+    // Create empty cells for days before the first day of the month
+    for (let i = 0; i < firstDayIndex; i++) {
+        const emptyDay = document.createElement('div');
+        emptyDay.className = 'calendar-day empty';
+        calendarDays.appendChild(emptyDay);
+    }
+    
+    // Get study logs for highlighting days with logs
+    const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
+    
+    // Create cells for each day of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dayElement = document.createElement('div');
+        dayElement.className = 'calendar-day';
+        dayElement.textContent = day;
+        
+        // Check if this is today
+        const currentDate = new Date();
+        if (currentDate.getDate() === day && 
+            currentDate.getMonth() === month && 
+            currentDate.getFullYear() === year) {
+            dayElement.classList.add('today');
+        }
+        
+        // Check if this day has study logs
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (studyLogs[dateStr] && Object.keys(studyLogs[dateStr]).length > 0) {
+            dayElement.classList.add('has-logs');
+            
+            // Add click event to show logs for this day
+            dayElement.addEventListener('click', () => showDayLogs(dateStr));
+        }
+        
+        calendarDays.appendChild(dayElement);
+    }
+}
+
+// Add this function to show logs for a specific day
+function showDayLogs(dateStr) {
+    const studyLogs = JSON.parse(localStorage.getItem('studyLogs') || '{}');
+    const dayLogs = studyLogs[dateStr] || {};
+    
+    if (Object.keys(dayLogs).length === 0) {
+        showInfo('No study logs for this day.');
+        return;
+    }
+    
+    // Format the date for display
+    const date = new Date(dateStr);
+    const formattedDate = date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    });
+    
+    // Create modal content
+    let modalContent = `<h3>Study Logs for ${formattedDate}</h3><div class="day-logs">`;
+    
+    // Sort logs by timestamp
+    const sortedLogs = Object.entries(dayLogs).sort((a, b) => {
+        return a[1].timestamp - b[1].timestamp;
+    });
+    
+    for (const [sessionId, logData] of sortedLogs) {
+        const sessionTime = new Date(logData.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        // Find the routine item description
+        let description = "Study Session";
+        for (const item of userRoutine) {
+            if (item.sessionId === sessionId) {
+                description = item.description;
+                break;
+            }
+        }
+        
+        modalContent += `
+            <div class="log-entry">
+                <div class="log-time">${sessionTime}</div>
+                <div class="log-details">
+                    <div class="log-title">${description}</div>
+                    <div class="log-notes">${logData.notes}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    modalContent += '</div>';
+    
+    // Show modal with logs
+    const dayLogsModal = document.getElementById('day-logs-modal');
+    const modalOverlay = document.getElementById('modal-overlay');
+    
+    if (dayLogsModal && modalOverlay) {
+        document.getElementById('day-logs-content').innerHTML = modalContent;
+        dayLogsModal.classList.add('active');
+        modalOverlay.classList.add('active');
+    } else {
+        console.error('Day logs modal or overlay not found');
+        // Fallback to notification if modal doesn't exist
+        showInfo(`Study logs for ${formattedDate}: ${sortedLogs.length} entries`);
+    }
+}
+
+// Add this function to close the day logs modal
+function closeDayLogsModal() {
+    const dayLogsModal = document.getElementById('day-logs-modal');
+    const modalOverlay = document.getElementById('modal-overlay');
+    
+    if (dayLogsModal && modalOverlay) {
+        dayLogsModal.classList.remove('active');
+        modalOverlay.classList.remove('active');
+    }
 } 
