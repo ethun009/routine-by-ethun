@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Routine Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#4a6fa5">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="assets/icons/icon.png">
+    
+    <!-- Add Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+    <div id="splash-screen" class="splash-screen">
+        <div class="splash-content">
+            <div class="splash-icon">
+                <img src="assets/icons/icon-512x512.png" alt="App Icon">
+            </div>
+            <div class="splash-title">My Daily Routine</div>
+            <div class="splash-subtitle">Developed by Ethun</div>
+            <div class="loading-container">
+                <div class="loading-bar">
+                    <div class="loading-progress"></div>
+                    <div class="loading-percentage">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>My Daily Routine</h1>
+            <div class="date-display">
+                <span id="current-date"></span>
+            </div>
+            <div class="profile-container">
+                <button id="profile-btn" class="profile-button">
+                    <i class="fas fa-user-circle"></i>
+                </button>
+                <div class="profile-dropdown" id="profile-dropdown">
+                    <div class="profile-header">
+                        <div class="profile-info">
+                            <span id="profile-email">Not logged in</span>
+                        </div>
+                    </div>
+                    <div class="profile-actions">
+                        <button id="login-profile-btn" class="profile-action-btn">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </button>
+                        <button id="edit-routine-btn" class="profile-action-btn">
+                            <i class="fas fa-edit"></i> Edit Routine
+                        </button>
+                        <button id="import-data-btn" class="profile-action-btn">
+                            <i class="fas fa-file-import"></i> Import Data
+                        </button>
+                        <button id="export-data-btn" class="profile-action-btn">
+                            <i class="fas fa-file-export"></i> Export Data
+                        </button>
+                        <button id="profile-logout-btn" class="profile-action-btn logout-btn">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <button id="install-btn" class="install-button" style="display: none;">
+                <i class="fas fa-download"></i> Install App
+            </button>
+            <div id="offline-status" class="offline-status" style="display: none;">
+                You are offline. Some features may be limited.
+            </div>
+        </header>
+
+        <!-- Add login modal -->
+        <div id="login-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>Login to Your Account</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="email">Email:</label>
+                        <input type="email" id="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password:</label>
+                        <input type="password" id="password" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Login</button>
+                        <button type="button" id="register-toggle" class="btn btn-secondary">Register</button>
+                    </div>
+                </form>
+                <form id="register-form" style="display: none;">
+                    <div class="form-group">
+                        <label for="reg-email">Email:</label>
+                        <input type="email" id="reg-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">Password:</label>
+                        <input type="password" id="reg-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm-password">Confirm Password:</label>
+                        <input type="password" id="confirm-password" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Register</button>
+                        <button type="button" id="login-toggle" class="btn btn-secondary">Back to Login</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Update the routine creation modal -->
+        <div id="create-routine-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>Create Your Daily Routine</h2>
+                <p class="modal-subtitle">Design your perfect day with customized activities</p>
+                
+                <div class="import-routine-option">
+                    <p>Don't want to create a routine from scratch?</p>
+                    <button id="import-routine-btn" class="btn btn-secondary">
+                        <i class="fas fa-file-import"></i> Import Routine
+                    </button>
+                </div>
+                
+                <form id="routine-form">
+                    <div id="routine-items">
+                        <!-- Routine items will be added here -->
+                    </div>
+                    
+                    <button type="button" id="add-routine-item" class="btn btn-secondary">
+                        <i class="fas fa-plus"></i> Add Activity
+                    </button>
+                    
+                    <button type="submit" class="btn btn-primary save-routine-btn">
+                        <i class="fas fa-save"></i> Save My Routine
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <main>
+            <div class="routine-container">
+                <div class="routine-header">
+                    <h2>My Daily Routine</h2>
+                </div>
+                <!-- Routine items will be generated here -->
+            </div>
+
+            <div class="study-log-container">
+                <h2>Study Log</h2>
+                <div class="todays-log">
+                    <h3>Today's Study Log</h3>
+                    <div id="todays-log-content">
+                        <div class="no-logs">No study logs for today yet.</div>
+                    </div>
+                </div>
+                <div class="study-history">
+                    <h3>This Month's Study History</h3>
+                    <div class="calendar-view">
+                        <div class="month-selector">
+                            <button id="prev-month"><i class="fas fa-chevron-left"></i></button>
+                            <span id="current-month">May 2023</span>
+                            <button id="next-month"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                        <div class="calendar-grid">
+                            <!-- Calendar will be generated here -->
+                        </div>
+                    </div>
+                    <div class="study-details">
+                        <h4>Study Details</h4>
+                        <div id="study-details-content">
+                            Select a date to view study details
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Daily Routine Tracker Developed by Ethun &copy; 2024</p>
+        </footer>
+    </div>
+
+    <div class="modal" id="study-detail-modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="modal-date">Study Details for <span></span></h3>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Add study log popup -->
+    <div class="popup-overlay" id="popup-overlay"></div>
+    <div class="study-log-popup" id="study-log-popup">
+        <h3>What did you study?</h3>
+        <textarea id="popup-study-notes" placeholder="Enter what you studied during this session..."></textarea>
+        <div class="popup-actions">
+            <button class="cancel-btn" id="cancel-log">Cancel</button>
+            <button class="save-btn" id="save-popup-log">Save</button>
+        </div>
+    </div>
+
+    <!-- Add this hidden file input for importing data -->
+    <input type="file" id="import-file-input" accept=".json" style="display: none;">
+
+    <script src="script.js"></script>
+</body>
+</html> 
